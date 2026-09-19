@@ -41,7 +41,7 @@
 
 ## Installation
 
-从 Release 下载 `心灵终结修改器_MO336.exe`，放到任意目录即可，无需安装。
+从 [Release](https://github.com/TOOOOOOBY-Q/mental-omega-trainer/releases/latest) 下载 `mental-omega-trainer-3.3.6.4.exe`，放到任意目录即可，无需安装。SHA-256：`F5E140DAF59500019E62A5F27E46DECD4A7EABCE05570606209510179ADA77DF`
 
 首次启动可能出现 SmartScreen 提示：发布版本使用 `CN=TOOOOOOBY` 自签名证书，不属于公共 CA 信任链，属预期现象。
 
@@ -58,7 +58,7 @@
 需要 Windows 与 .NET Framework 4.x 自带的 `csc.exe`（无需安装 Visual Studio）：
 
 ```powershell
-git clone <repository-url>
+git clone https://github.com/TOOOOOOBY-Q/mental-omega-trainer.git
 cd mental-omega-trainer
 powershell -ExecutionPolicy Bypass -File scripts\Build.ps1
 ```

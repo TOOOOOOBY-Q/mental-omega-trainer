@@ -1,0 +1,49 @@
+name: Bug 报告
+description: 报告功能失效、崩溃或显示问题
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 修改器版本
+      description: 标题栏或“复制诊断”第一行中的版本号，例如 3.3.6.4
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      description: 例如 Windows 11 24H2
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: 游戏版本
+      description: 例如 Mental Omega 3.3.6
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      placeholder: 1. 启动游戏进入遭遇战 2. 按 F6 ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 运行记录
+      description: 点击修改器中的“复制诊断”粘贴到这里。请勿提交任何账号、凭据或私密信息。

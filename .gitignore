@@ -1,0 +1,30 @@
+# 构建产物
+release/
+*.exe
+*.pdb
+
+# 本地签名材料（绝不提交）
+*.pfx
+*.cer
+
+# 本地环境
+.env
+.env.*
+!.env.example
+
+# 日志与崩溃转储
+*.log
+*.dmp
+*.tmp
+
+# IDE / 编辑器本地状态
+.vs/
+.idea/
+*.suo
+*.user
+*.userprefs
+
+# 操作系统
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/

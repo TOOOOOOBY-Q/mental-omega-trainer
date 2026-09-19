@@ -1,0 +1,42 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (admin manifest)
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\Build.ps1 -OutputPath release\心灵终结修改器_MO336.exe
+
+      - name: Build (no-admin smoke variant)
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\Build.ps1 -NoAdmin -OutputPath release\smoke.exe
+
+      - name: Verify artifacts
+        shell: pwsh
+        run: |
+          $exe = Get-Item release\心灵终结修改器_MO336.exe
+          $bytes = [System.IO.File]::ReadAllBytes($exe.FullName)
+          if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw 'PE 头无效' }
+          if ($exe.VersionInfo.FileVersion -ne '3.3.6.4') { throw "版本号错误: $($exe.VersionInfo.FileVersion)" }
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          if ($text -notmatch 'requireAdministrator') { throw '清单缺少 requireAdministrator' }
+          Write-Host "SHA-256: $((Get-FileHash $exe.FullName -Algorithm SHA256).Hash)"
+          Write-Host 'artifact verification passed'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mo-trainer-build
+          path: release/心灵终结修改器_MO336.exe
+          retention-days: 14

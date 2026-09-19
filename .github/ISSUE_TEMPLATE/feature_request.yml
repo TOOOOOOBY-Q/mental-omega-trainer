@@ -1,0 +1,16 @@
+name: 功能建议
+description: 提出新功能或改进建议
+labels: [enhancement]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 需求描述
+      description: 希望增加什么功能，解决什么问题
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: 补充说明
+      description: 使用场景、参考实现等。注意本项目仅支持单机，不接受联网或联机对战功能。

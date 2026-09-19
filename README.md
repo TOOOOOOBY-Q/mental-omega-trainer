@@ -97,7 +97,7 @@ powershell -ExecutionPolicy Bypass -File scripts\Build.ps1
 
 ## License
 
-当前版本暂未附带开源许可证；在未补充 LICENSE 文件前，默认保留所有权利。仅允许从本仓库下载并按上述用途使用。
+本项目采用 [MIT License](LICENSE)。
 
 ## Acknowledgements
 

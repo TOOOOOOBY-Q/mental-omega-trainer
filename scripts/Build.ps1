@@ -1,4 +1,4 @@
-# 构建心灵终结单机修改器。
+﻿# 构建心灵终结单机修改器。
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File scripts\Build.ps1

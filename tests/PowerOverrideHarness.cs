@@ -221,7 +221,14 @@ namespace MOTrainer336
             {
                 Child.StandardInput.WriteLine(text);
                 Child.StandardInput.Flush();
-                return Child.StandardOutput.ReadLine();
+                string response = Child.StandardOutput.ReadLine();
+                if (response == null)
+                {
+                    Child.WaitForExit(3000);
+                    throw new InvalidOperationException("fixture ended after '" + text + "', exit " +
+                        (Child.HasExited ? Child.ExitCode.ToString("X8") : "pending") + ": " + Child.StandardError.ReadToEnd());
+                }
+                return response;
             }
             public void Dispose()
             {
@@ -241,7 +248,8 @@ namespace MOTrainer336
             string error;
             using (Fixture host = new Fixture())
             {
-                Check(host.Send("build A") == "0,200", "build baseline retains natural production");
+                string baseline = host.Send("build A");
+                Check(baseline == "0,200", "build baseline retains natural production (observed: " + baseline + ")");
                 Check(host.BuildPatch.SetEnabled(true, out error), "enable instant build: " + error);
                 Check(host.Send("build A") == "53,0", "build advances player to final production step");
                 Check(host.Send("build B") == "0,200", "build does not accelerate AI");

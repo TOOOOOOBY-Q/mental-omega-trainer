@@ -1,4 +1,4 @@
-// 心灵终结单机修改器 (Mental Omega 3.3.6 single-player trainer)
+﻿// 心灵终结单机修改器 (Mental Omega 3.3.6 single-player trainer)
 //
 // 目标游戏：Mental Omega 3.3.6（基于 Yuri's Revenge 1.001，经 Syringe 加载 Ares）。
 // 工作原理：按进程名附加 gamemd.exe，通过 ReadProcessMemory / WriteProcessMemory
@@ -15,7 +15,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
 
-[assembly: AssemblyFileVersion("3.3.6.4")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
 [assembly: CompilationRelaxations(8)]
 [assembly: RuntimeCompatibility(WrapNonExceptionThrows = true)]
 [assembly: AssemblyCopyright("TOOOOOOBY")]
@@ -23,7 +23,7 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Mental Omega 3.3.6 / Yuri's Revenge 1.001 单机修改器")]
 [assembly: AssemblyCompany("TOOOOOOBY")]
 [assembly: AssemblyProduct("心灵终结修改器")]
-[assembly: AssemblyVersion("3.3.6.4")]
+[assembly: AssemblyVersion("1.0.0.0")]
 namespace MOTrainer336
 {
 	internal static class NativeMethods
@@ -108,8 +108,6 @@ namespace MOTrainer336
 
 		internal const int BalanceOffset = 780;
 
-		internal const int FactoryCountOffset = 21368;
-
 		internal const int PowerOutputOffset = 21412;
 
 		internal const int PowerDrainOffset = 21416;
@@ -131,6 +129,18 @@ namespace MOTrainer336
 		private Process process;
 
 		private IntPtr handle;
+
+		private PowerOverride powerOverride;
+
+		private BuildOverride buildOverride;
+
+		internal bool IsBuildEnabled { get { return buildOverride != null && buildOverride.MayBeEnabled; } }
+
+		internal bool HasBuildRecovery { get { return buildOverride != null && buildOverride.NeedsRecovery; } }
+
+		internal bool IsPowerEnabled { get { return powerOverride != null && powerOverride.MayBeEnabled; } }
+
+		internal bool HasPowerRecovery { get { return powerOverride != null && powerOverride.NeedsRecovery; } }
 
 		internal int ProcessId
 		{
@@ -340,25 +350,30 @@ namespace MOTrainer336
 
 		internal bool SetPower(bool enabled, out string error)
 		{
-			// Ares 兼容的数据模式：直接写 HouseClass 的电力字段，
-			// 不修改游戏代码段，避免与 Ares 的运行时钩子冲突。
-			if (!enabled)
-			{
-				error = null;
-				return true;
-			}
+			// 在游戏线程的供电结算内修改结果，使电量与建筑/雷达状态同步。
+			// 只从外部定时改写两个字段，会与 UpdatePower 的重算发生竞争。
 			int player;
-			if (!HasCurrentPlayer(out player))
+			if (!HasCurrentPlayer(out player) && enabled)
 			{
 				return Fail("请先进入一局游戏", out error);
 			}
-			if (!TryWriteInt32(player + 21412, 1000000))
+			if (powerOverride == null)
 			{
-				return LastError("电力输出写入失败", out error);
+				if (!enabled)
+				{
+					error = null;
+					return true;
+				}
+				powerOverride = new PowerOverride(process, handle);
 			}
-			if (!TryWriteInt32(player + 21416, 0))
+			return powerOverride.SetEnabled(enabled, player, out error);
+		}
+
+		internal bool RestorePower(out string error)
+		{
+			if (powerOverride != null)
 			{
-				return LastError("电力消耗写入失败", out error);
+				return powerOverride.Detach(out error);
 			}
 			error = null;
 			return true;
@@ -419,43 +434,30 @@ namespace MOTrainer336
 			return true;
 		}
 
-		internal bool ReadFactoryCounts(out int[] counts)
-		{
-			counts = null;
-			int player;
-			if (!HasCurrentPlayer(out player))
-			{
-				return false;
-			}
-			int[] array = new int[5];
-			for (int i = 0; i < array.Length; i++)
-			{
-				if (!TryReadInt32(player + 21368 + i * 4, out array[i]))
-				{
-					return false;
-				}
-			}
-			counts = array;
-			return true;
-		}
-
-		internal bool SetFactoryCounts(int[] values, out string error)
+		internal bool SetBuild(bool enabled, out string error)
 		{
 			int player;
-			if (!HasCurrentPlayer(out player))
+			if (enabled && !HasCurrentPlayer(out player))
 			{
 				return Fail("请先进入一局游戏", out error);
 			}
-			if (values == null || values.Length != 5)
+			if (buildOverride == null)
 			{
-				return Fail("建造参数无效", out error);
-			}
-			for (int i = 0; i < values.Length; i++)
-			{
-				if (!TryWriteInt32(player + 21368 + i * 4, values[i]))
+				if (!enabled)
 				{
-					return LastError("快速建造写入失败", out error);
+					error = null;
+					return true;
 				}
+				buildOverride = new BuildOverride(process, handle);
+			}
+			return buildOverride.SetEnabled(enabled, out error);
+		}
+
+		internal bool RestoreBuild(out string error)
+		{
+			if (buildOverride != null)
+			{
+				return buildOverride.Detach(out error);
 			}
 			error = null;
 			return true;
@@ -463,7 +465,7 @@ namespace MOTrainer336
 
 		internal string SignatureSummary()
 		{
-			return "Ares 数据模式";
+			return "Ares 兼容模式";
 		}
 
 		private bool TryReadInt32(int address, out int value)
@@ -538,6 +540,18 @@ namespace MOTrainer336
 
 		public void Dispose()
 		{
+			if (buildOverride != null && IsAlive)
+			{
+				string error;
+				buildOverride.Detach(out error);
+			}
+			buildOverride = null;
+			if (powerOverride != null && IsAlive)
+			{
+				string error;
+				powerOverride.Detach(out error);
+			}
+			powerOverride = null;
 			if (handle != IntPtr.Zero)
 			{
 				NativeMethods.CloseHandle(handle);
@@ -550,7 +564,7 @@ namespace MOTrainer336
 			}
 		}
 	}
-	internal sealed class TrainerForm : Form
+	internal sealed partial class TrainerForm : Form
 	{
 		private const int HotkeyMoney = 101;
 
@@ -564,23 +578,19 @@ namespace MOTrainer336
 
 		private const int HotkeyWin = 105;
 
-		private readonly Color background = Color.FromArgb(19, 22, 29);
+		private readonly Color background = Color.FromArgb(15, 20, 28);
 
-		private readonly Color card = Color.FromArgb(29, 34, 44);
+		private readonly Color card = Color.FromArgb(24, 31, 41);
 
-		private readonly Color cardHover = Color.FromArgb(36, 42, 54);
-
-		private readonly Color accent = Color.FromArgb(229, 67, 75);
-
-		private readonly Color accentDark = Color.FromArgb(188, 47, 55);
+		private readonly Color accent = Color.FromArgb(234, 190, 119);
 
 		private readonly Color textPrimary = Color.FromArgb(242, 244, 248);
 
-		private readonly Color textSecondary = Color.FromArgb(163, 172, 188);
+		private readonly Color textSecondary = Color.FromArgb(158, 174, 194);
 
-		private readonly Color success = Color.FromArgb(70, 201, 137);
+		private readonly Color success = Color.FromArgb(109, 218, 174);
 
-		private readonly Color warning = Color.FromArgb(246, 185, 59);
+		private readonly Color warning = Color.FromArgb(234, 190, 119);
 
 		private readonly Timer refreshTimer = new Timer();
 
@@ -592,10 +602,6 @@ namespace MOTrainer336
 
 		private GameMemory memory;
 
-		private int[] factorySnapshot;
-
-		private int factorySnapshotPlayer;
-
 		private string lastFeatureError;
 
 		private bool internalToggle;
@@ -605,8 +611,6 @@ namespace MOTrainer336
 		private Label statusTitle;
 
 		private Label statusDetail;
-
-		private Label gamePath;
 
 		private Label activity;
 
@@ -622,372 +626,11 @@ namespace MOTrainer336
 
 		private CheckBox topMostToggle;
 
-		internal TrainerForm()
-		{
-			Text = "心灵终结 3.3.6 · 单机修改器";
-			base.AutoScaleDimensions = new SizeF(96f, 96f);
-			base.AutoScaleMode = AutoScaleMode.Dpi;
-			base.ClientSize = new Size(700, 700);
-			base.StartPosition = FormStartPosition.CenterScreen;
-			BackColor = background;
-			ForeColor = textPrimary;
-			Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
-			base.FormBorderStyle = FormBorderStyle.FixedSingle;
-			base.MaximizeBox = false;
-			DoubleBuffered = true;
-			base.Padding = new Padding(30, 24, 30, 22);
-			try
-			{
-				base.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-			}
-			catch
-			{
-			}
-			BuildInterface();
-			refreshTimer.Interval = 250;
-			refreshTimer.Tick += OnRefresh;
-			refreshTimer.Start();
-			featureTimer.Interval = 15;
-			featureTimer.Tick += OnFeatureTick;
-			featureTimer.Start();
-			base.Shown += OnShown;
-			base.FormClosing += OnClosing;
-		}
-
-		private void BuildInterface()
-		{
-			TableLayoutPanel tableLayoutPanel = new TableLayoutPanel();
-			tableLayoutPanel.Dock = DockStyle.Fill;
-			tableLayoutPanel.ColumnCount = 1;
-			tableLayoutPanel.RowCount = 7;
-			tableLayoutPanel.BackColor = background;
-			tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
-			tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 82f));
-			tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 82f));
-			tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 196f));
-			tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 74f));
-			tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-			tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
-			base.Controls.Add(tableLayoutPanel);
-			tableLayoutPanel.Controls.Add(BuildHeader(), 0, 0);
-			tableLayoutPanel.Controls.Add(BuildStatusCard(), 0, 1);
-			tableLayoutPanel.Controls.Add(BuildMoneyCard(), 0, 2);
-			tableLayoutPanel.Controls.Add(BuildToggleArea(), 0, 3);
-			tableLayoutPanel.Controls.Add(BuildActionCard(), 0, 4);
-			tableLayoutPanel.Controls.Add(BuildDiagnosticsCard(), 0, 5);
-			tableLayoutPanel.Controls.Add(BuildFooter(), 0, 6);
-		}
-
-		private Control BuildHeader()
-		{
-			Panel panel = new Panel();
-			panel.Dock = DockStyle.Fill;
-			panel.BackColor = background;
-			Panel panel2 = panel;
-			Label label = NewLabel("心灵终结 单机修改器", 20f, FontStyle.Bold, textPrimary);
-			label.Location = new Point(0, 0);
-			label.AutoSize = true;
-			panel2.Controls.Add(label);
-			Label label2 = NewLabel("Mental Omega 3.3.6  ·  Yuri's Revenge 1.001 + Ares", 9f, FontStyle.Regular, textSecondary);
-			label2.Location = new Point(2, 40);
-			label2.AutoSize = true;
-			panel2.Controls.Add(label2);
-			topMostToggle = new CheckBox();
-			topMostToggle.Text = "窗口置顶";
-			topMostToggle.ForeColor = textSecondary;
-			topMostToggle.AutoSize = true;
-			topMostToggle.Location = new Point(490, 10);
-			topMostToggle.CheckedChanged += delegate
-			{
-				base.TopMost = topMostToggle.Checked;
-			};
-			panel2.Controls.Add(topMostToggle);
-			return panel2;
-		}
-
-		private Control BuildStatusCard()
-		{
-			Panel panel = NewCard();
-			statusDot = new Panel
-			{
-				Size = new Size(12, 12),
-				Location = new Point(18, 19),
-				BackColor = warning
-			};
-			statusDot.Paint += delegate(object sender, PaintEventArgs e)
-			{
-				e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-				using (SolidBrush brush = new SolidBrush(statusDot.BackColor))
-				{
-					e.Graphics.FillEllipse(brush, 0, 0, 11, 11);
-				}
-			};
-			panel.Controls.Add(statusDot);
-			statusTitle = NewLabel("等待游戏", 11f, FontStyle.Bold, textPrimary);
-			statusTitle.Location = new Point(42, 12);
-			statusTitle.AutoSize = true;
-			panel.Controls.Add(statusTitle);
-			statusDetail = NewLabel("启动 Mental Omega 后会自动连接", 8.5f, FontStyle.Regular, textSecondary);
-			statusDetail.Location = new Point(42, 37);
-			statusDetail.AutoSize = true;
-			panel.Controls.Add(statusDetail);
-			gamePath = NewLabel("", 8f, FontStyle.Regular, textSecondary);
-			gamePath.AutoEllipsis = true;
-			gamePath.Location = new Point(330, 17);
-			gamePath.Size = new Size(220, 38);
-			gamePath.TextAlign = ContentAlignment.MiddleRight;
-			panel.Controls.Add(gamePath);
-			return panel;
-		}
-
-		private Control BuildMoneyCard()
-		{
-			Panel panel = NewCard();
-			Label label = NewLabel("资金", 11f, FontStyle.Bold, textPrimary);
-			label.Location = new Point(18, 14);
-			label.AutoSize = true;
-			panel.Controls.Add(label);
-			moneyAmount = new NumericUpDown();
-			moneyAmount.Minimum = 0m;
-			moneyAmount.Maximum = 99999999m;
-			moneyAmount.Value = 1000000m;
-			moneyAmount.ThousandsSeparator = true;
-			moneyAmount.BackColor = Color.FromArgb(20, 24, 32);
-			moneyAmount.ForeColor = textPrimary;
-			moneyAmount.BorderStyle = BorderStyle.FixedSingle;
-			moneyAmount.Font = new Font(Font.FontFamily, 10f, FontStyle.Bold);
-			moneyAmount.Location = new Point(350, 20);
-			moneyAmount.Size = new Size(122, 30);
-			panel.Controls.Add(moneyAmount);
-			Button button = NewButton("应用  F5", 78);
-			button.Location = new Point(480, 15);
-			button.Click += delegate
-			{
-				SetMoney();
-			};
-			panel.Controls.Add(button);
-			return panel;
-		}
-
-		private Control BuildToggleArea()
-		{
-			TableLayoutPanel tableLayoutPanel = new TableLayoutPanel();
-			tableLayoutPanel.Dock = DockStyle.Fill;
-			tableLayoutPanel.ColumnCount = 1;
-			tableLayoutPanel.RowCount = 3;
-			tableLayoutPanel.Padding = new Padding(0, 4, 0, 4);
-			tableLayoutPanel.BackColor = background;
-			tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333f));
-			tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333f));
-			tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 33.334f));
-			powerToggle = AddToggleCard(tableLayoutPanel, 0, "无限电力", "F6");
-			buildToggle = AddToggleCard(tableLayoutPanel, 1, "快速建造", "F9");
-			superToggle = AddToggleCard(tableLayoutPanel, 2, "无限超级武器", "F10");
-			powerToggle.CheckedChanged += delegate
-			{
-				if (!internalToggle)
-				{
-					TogglePower();
-				}
-			};
-			buildToggle.CheckedChanged += delegate
-			{
-				if (!internalToggle)
-				{
-					ToggleBuild();
-				}
-			};
-			superToggle.CheckedChanged += delegate
-			{
-				if (!internalToggle)
-				{
-					ToggleSuper();
-				}
-			};
-			return tableLayoutPanel;
-		}
-
-		private CheckBox AddToggleCard(TableLayoutPanel table, int row, string title, string hotkey)
-		{
-			Panel panel = NewCard();
-			panel.Margin = new Padding(0, 4, 0, 4);
-			Label label = NewLabel(title, 10.5f, FontStyle.Bold, textPrimary);
-			label.Location = new Point(18, 15);
-			label.AutoSize = true;
-			panel.Controls.Add(label);
-			Label label2 = NewLabel(hotkey, 8.5f, FontStyle.Bold, textSecondary);
-			label2.TextAlign = ContentAlignment.MiddleCenter;
-			label2.BackColor = Color.FromArgb(45, 51, 64);
-			label2.Location = new Point(472, 14);
-			label2.Size = new Size(42, 24);
-			panel.Controls.Add(label2);
-			CheckBox toggle = new CheckBox();
-			toggle.Appearance = Appearance.Button;
-			toggle.FlatStyle = FlatStyle.Flat;
-			toggle.FlatAppearance.BorderSize = 1;
-			toggle.FlatAppearance.BorderColor = Color.FromArgb(85, 94, 112);
-			toggle.FlatAppearance.CheckedBackColor = accent;
-			toggle.BackColor = Color.FromArgb(44, 50, 62);
-			toggle.ForeColor = textPrimary;
-			toggle.Text = "OFF";
-			toggle.TextAlign = ContentAlignment.MiddleCenter;
-			toggle.Font = new Font("Segoe UI", 8f, FontStyle.Bold);
-			toggle.Location = new Point(520, 12);
-			toggle.Size = new Size(42, 28);
-			toggle.CheckedChanged += delegate
-			{
-				toggle.Text = (toggle.Checked ? "ON" : "OFF");
-			};
-			panel.Controls.Add(toggle);
-			table.Controls.Add(panel, 0, row);
-			return toggle;
-		}
-
-		private Control BuildActionCard()
-		{
-			Panel panel = NewCard();
-			Label label = NewLabel("一键全图", 11f, FontStyle.Bold, textPrimary);
-			label.Location = new Point(18, 19);
-			label.AutoSize = true;
-			panel.Controls.Add(label);
-			Button button = NewButton("执行  F7", 96);
-			button.Location = new Point(130, 11);
-			button.Click += delegate
-			{
-				RevealMap();
-			};
-			panel.Controls.Add(button);
-			Label label2 = NewLabel("立即胜利", 11f, FontStyle.Bold, textPrimary);
-			label2.Location = new Point(330, 19);
-			label2.AutoSize = true;
-			panel.Controls.Add(label2);
-			Button button2 = NewButton("执行  F11", 96);
-			button2.Location = new Point(466, 11);
-			button2.Click += delegate
-			{
-				TriggerWin();
-			};
-			panel.Controls.Add(button2);
-			return panel;
-		}
-
-		private Control BuildDiagnosticsCard()
-		{
-			Panel panel = NewCard();
-			Label label = NewLabel("运行记录", 9.5f, FontStyle.Bold, textPrimary);
-			label.Location = new Point(14, 9);
-			label.AutoSize = true;
-			panel.Controls.Add(label);
-			Button button = NewSecondaryButton("复制诊断", 82);
-			button.Location = new Point(480, 5);
-			button.Click += delegate
-			{
-				try
-				{
-					Clipboard.SetText(BuildDiagnosticText());
-					Log("诊断信息已复制");
-				}
-				catch (Exception ex)
-				{
-					Log("复制失败：" + ex.Message);
-				}
-			};
-			panel.Controls.Add(button);
-			diagnostics = new TextBox();
-			diagnostics.ReadOnly = true;
-			diagnostics.Multiline = true;
-			diagnostics.ScrollBars = ScrollBars.Vertical;
-			diagnostics.BorderStyle = BorderStyle.None;
-			diagnostics.BackColor = card;
-			diagnostics.ForeColor = textSecondary;
-			diagnostics.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
-			diagnostics.WordWrap = false;
-			diagnostics.Location = new Point(15, 39);
-			diagnostics.Size = new Size(545, 60);
-			diagnostics.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-			panel.Controls.Add(diagnostics);
-			return panel;
-		}
-
-		private Control BuildFooter()
-		{
-			Panel panel = new Panel();
-			panel.Dock = DockStyle.Fill;
-			panel.BackColor = background;
-			Panel panel2 = panel;
-			activity = NewLabel("仅用于本地单机游戏  ·  无广告  ·  无更新检查", 8f, FontStyle.Regular, textSecondary);
-			activity.Location = new Point(0, 6);
-			activity.AutoSize = true;
-			panel2.Controls.Add(activity);
-			Label label = NewLabel("TOOOOOOBY", 8f, FontStyle.Bold, textSecondary);
-			label.Location = new Point(485, 6);
-			label.AutoSize = true;
-			panel2.Controls.Add(label);
-			return panel2;
-		}
-
-		private Panel NewCard()
-		{
-			Panel panel = new Panel();
-			panel.Dock = DockStyle.Fill;
-			panel.BackColor = card;
-			panel.Margin = new Padding(0, 4, 0, 4);
-			panel.Padding = new Padding(0);
-			return panel;
-		}
-
-		private Label NewLabel(string value, float size, FontStyle style, Color color)
-		{
-			Label label = new Label();
-			label.Text = value;
-			label.Font = new Font("Microsoft YaHei UI", size, style, GraphicsUnit.Point);
-			label.ForeColor = color;
-			label.BackColor = Color.Transparent;
-			return label;
-		}
-
-		private Button NewButton(string value, int width)
-		{
-			Button button = new Button();
-			button.Text = value;
-			button.Size = new Size(width, 36);
-			button.FlatStyle = FlatStyle.Flat;
-			button.FlatAppearance.BorderSize = 0;
-			button.BackColor = accent;
-			button.ForeColor = Color.White;
-			button.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
-			button.Cursor = Cursors.Hand;
-			button.MouseEnter += delegate
-			{
-				button.BackColor = accentDark;
-			};
-			button.MouseLeave += delegate
-			{
-				button.BackColor = accent;
-			};
-			return button;
-		}
-
-		private Button NewSecondaryButton(string value, int width)
-		{
-			Button button = NewButton(value, width);
-			button.Size = new Size(width, 28);
-			button.BackColor = Color.FromArgb(55, 62, 76);
-			button.FlatAppearance.BorderSize = 1;
-			button.FlatAppearance.BorderColor = Color.FromArgb(82, 90, 106);
-			button.MouseEnter += delegate
-			{
-				button.BackColor = cardHover;
-			};
-			button.MouseLeave += delegate
-			{
-				button.BackColor = Color.FromArgb(55, 62, 76);
-			};
-			return button;
-		}
-
 		private void OnShown(object sender, EventArgs e)
 		{
+			if (previewOnly) return;
+			Rectangle workArea = Screen.FromControl(this).WorkingArea;
+			if (Height > workArea.Height) { Height = workArea.Height; Top = workArea.Top; }
 			RegisterAllHotkeys();
 			Log("已启动：等待 gamemd.exe");
 		}
@@ -1016,27 +659,27 @@ namespace MOTrainer336
 
 		protected override void WndProc(ref Message m)
 		{
-			if (m.Msg == 786)
+			if (m.Msg == 786 && !previewOnly)
 			{
 				switch (m.WParam.ToInt32())
 				{
 				case 101:
-					SetMoney();
+					moneyButton.PerformClick();
 					break;
 				case 102:
-					powerToggle.Checked = !powerToggle.Checked;
+					if (powerToggle.Enabled) powerToggle.Checked = !powerToggle.Checked;
 					break;
 				case 106:
-					RevealMap();
+					mapButton.PerformClick();
 					break;
 				case 103:
-					buildToggle.Checked = !buildToggle.Checked;
+					if (buildToggle.Enabled) buildToggle.Checked = !buildToggle.Checked;
 					break;
 				case 104:
-					superToggle.Checked = !superToggle.Checked;
+					if (superToggle.Enabled) superToggle.Checked = !superToggle.Checked;
 					break;
 				case 105:
-					TriggerWin();
+					winButton.PerformClick();
 					break;
 				}
 			}
@@ -1054,8 +697,6 @@ namespace MOTrainer336
 				{
 					memory.Dispose();
 					memory = null;
-					factorySnapshot = null;
-					factorySnapshotPlayer = 0;
 					SetAllToggles(false);
 					Log("游戏已退出，功能状态已重置");
 				}
@@ -1071,43 +712,47 @@ namespace MOTrainer336
 			}
 			int player;
 			bool flag = memory.HasCurrentPlayer(out player);
-			statusDot.BackColor = (flag ? success : warning);
-			statusDot.Invalidate();
-			statusTitle.Text = (flag ? "已连接 · 游戏中" : "已连接 · 等待进入对局");
-			statusDetail.Text = "gamemd.exe  ·  PID " + memory.ProcessId + "  ·  " + memory.SignatureSummary();
-			gamePath.Text = memory.ExecutablePath;
-			if (flag && buildToggle.Checked && player != factorySnapshotPlayer)
-			{
-				if (!memory.ReadFactoryCounts(out factorySnapshot))
-				{
-					LogOnce("无法读取新对局的建造现场值");
-					SetToggle(buildToggle, false);
-					factorySnapshotPlayer = 0;
-				}
-				else
-				{
-					factorySnapshotPlayer = player;
-					Log("已识别新对局，快速建造现场值已刷新");
-				}
-			}
+			UpdateConnection(true, flag, memory.ExecutablePath);
 		}
 
 		private void OnFeatureTick(object sender, EventArgs e)
 		{
 			int player;
-			if (memory == null || !memory.IsAlive || !memory.HasCurrentPlayer(out player))
+			if (memory == null || !memory.IsAlive)
 			{
 				return;
 			}
 			string text = null;
 			string error;
+			if (memory.HasBuildRecovery)
+			{
+				bool recovered = memory.RestoreBuild(out error);
+				SetToggle(buildToggle, memory.IsBuildEnabled);
+				if (!recovered)
+				{
+					LogOnce(error);
+					return;
+				}
+			}
+			if (memory.HasPowerRecovery)
+			{
+				bool recovered = memory.RestorePower(out error);
+				SetToggle(powerToggle, memory.IsPowerEnabled);
+				if (!recovered)
+				{
+					LogOnce(error);
+					return;
+				}
+			}
+			if (!memory.HasCurrentPlayer(out player))
+			{
+				if (text != null) LogOnce(text);
+				return;
+			}
 			if (powerToggle.Checked && !memory.SetPower(true, out error))
 			{
 				text = error;
-			}
-			if (text == null && buildToggle.Checked && !memory.SetFactoryCounts(new int[5] { 15, 15, 15, 15, 15 }, out error))
-			{
-				text = error;
+				SetToggle(powerToggle, memory.IsPowerEnabled);
 			}
 			if (text == null && superToggle.Checked && !memory.SetSuperWeapon(true, out error))
 			{
@@ -1129,11 +774,20 @@ namespace MOTrainer336
 
 		private void ShowDisconnected(string detail)
 		{
-			statusDot.BackColor = warning;
-			statusDot.Invalidate();
-			statusTitle.Text = "等待游戏";
-			statusDetail.Text = detail + "；启动 Mental Omega 后会自动连接";
-			gamePath.Text = "";
+			UpdateConnection(false, false, null);
+			uiTips.SetToolTip(statusDetail, detail);
+			bool failure = !string.IsNullOrEmpty(detail) && detail != "未检测到 gamemd.exe";
+			if (failure)
+			{
+				statusTitle.Text = "暂时无法连接";
+				statusDetail.Text = detail;
+				statusDot.BackColor = danger;
+				connectionBadge.Text = "连接异常";
+				connectionBadge.ForeColor = danger;
+				connectionBadge.BackColor = Color.FromArgb(50, 30, 34);
+				if (lastConnectionError != detail) Log("连接失败：" + detail);
+			}
+			lastConnectionError = failure ? detail : null;
 		}
 
 		private bool EnsureReady()
@@ -1198,7 +852,8 @@ namespace MOTrainer336
 
 		private void TogglePower()
 		{
-			if (!EnsureReady())
+			// 离开对局后仍允许关闭已安装的电力补丁。
+			if (memory == null || !memory.IsAlive || (powerToggle.Checked && !EnsureReady()))
 			{
 				SetToggle(powerToggle, false);
 				return;
@@ -1206,64 +861,33 @@ namespace MOTrainer336
 			string error;
 			if (memory.SetPower(powerToggle.Checked, out error))
 			{
-				Log("无限电力 " + (powerToggle.Checked ? "已开启" : "已关闭"));
+				Log("无限电力 " + (powerToggle.Checked ? "已开启，等待游戏更新供电" : "已关闭，等待游戏重算电量"));
 				return;
 			}
 			Log(error);
-			SetToggle(powerToggle, !powerToggle.Checked);
+			SetToggle(powerToggle, memory.IsPowerEnabled);
 		}
 
 		private void ToggleBuild()
 		{
-			if (!EnsureReady())
+			if (memory == null || !memory.IsAlive || (buildToggle.Checked && !EnsureReady()))
 			{
 				SetToggle(buildToggle, false);
 				return;
 			}
-			string error = null;
-			if (buildToggle.Checked)
+			string error;
+			if (memory.SetBuild(buildToggle.Checked, out error))
 			{
-				if (!memory.HasCurrentPlayer(out factorySnapshotPlayer))
-				{
-					Log("无法读取当前玩家");
-					SetToggle(buildToggle, false);
-				}
-				else if (!memory.ReadFactoryCounts(out factorySnapshot))
-				{
-					Log("无法读取建造现场值");
-					factorySnapshotPlayer = 0;
-					SetToggle(buildToggle, false);
-				}
-				else if (memory.SetFactoryCounts(new int[5] { 15, 15, 15, 15, 15 }, out error))
-				{
-					Log("快速建造已开启");
-				}
-				else
-				{
-					Log(error);
-					factorySnapshot = null;
-					factorySnapshotPlayer = 0;
-					SetToggle(buildToggle, false);
-				}
+				Log("快速建造 " + (buildToggle.Checked ? "已开启：建筑与单位近乎立即完成，仍需足额资金" : "已关闭"));
+				return;
 			}
-			else
-			{
-				if (factorySnapshot != null && memory.SetFactoryCounts(factorySnapshot, out error))
-				{
-					Log("快速建造已关闭并恢复现场值");
-				}
-				else if (factorySnapshot != null)
-				{
-					Log(error);
-				}
-				factorySnapshot = null;
-				factorySnapshotPlayer = 0;
-			}
+			Log(error);
+			SetToggle(buildToggle, memory.IsBuildEnabled);
 		}
 
 		private void ToggleSuper()
 		{
-			if (!EnsureReady())
+			if (memory == null || !memory.IsAlive || (superToggle.Checked && !EnsureReady()))
 			{
 				SetToggle(superToggle, false);
 				return;
@@ -1321,7 +945,7 @@ namespace MOTrainer336
 		private string BuildDiagnosticText()
 		{
 			StringBuilder stringBuilder = new StringBuilder();
-			stringBuilder.AppendLine("心灵终结修改器 3.3.6.4 / TOOOOOOBY");
+			stringBuilder.AppendLine("心灵终结修改器 1.0.0 / TOOOOOOBY");
 			stringBuilder.AppendLine("OS: " + Environment.OSVersion);
 			stringBuilder.AppendLine("Process: " + ((memory == null) ? "not attached" : memory.ProcessId.ToString()));
 			if (memory != null)
@@ -1345,13 +969,18 @@ namespace MOTrainer336
 			if (memory != null && memory.IsAlive)
 			{
 				string error;
-				if (buildToggle.Checked && factorySnapshot != null)
+				string buildError;
+				bool buildRestored = memory.RestoreBuild(out buildError);
+				bool powerRestored = memory.RestorePower(out error);
+				SetToggle(buildToggle, memory.IsBuildEnabled);
+				SetToggle(powerToggle, memory.IsPowerEnabled);
+				if (!buildRestored || !powerRestored)
 				{
-					memory.SetFactoryCounts(factorySnapshot, out error);
-				}
-				if (powerToggle.Checked)
-				{
-					memory.SetPower(false, out error);
+					Log("暂未退出：" + buildError + " " + error);
+					e.Cancel = true;
+					refreshTimer.Start();
+					featureTimer.Start();
+					return;
 				}
 				if (superToggle.Checked)
 				{

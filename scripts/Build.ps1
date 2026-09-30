@@ -16,6 +16,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $source = Join-Path $PSScriptRoot '..\src\MOTrainer336.cs'
+$powerSource = Join-Path $PSScriptRoot '..\src\PowerOverride.cs'
+$buildSource = Join-Path $PSScriptRoot '..\src\BuildOverride.cs'
+$hookSource = Join-Path $PSScriptRoot '..\src\RemoteCallHook.cs'
 $manifest = Join-Path $PSScriptRoot '..\src\app.manifest'
 
 # 定位 .NET Framework 自带的 C# 编译器（目标框架 4.x，Windows 10/11 均内置运行时）。
@@ -32,6 +35,10 @@ if ($outDir -and -not (Test-Path $outDir)) { New-Item -ItemType Directory -Force
 $args = @('/nologo', '/target:winexe', '/platform:x86', '/utf8output', '/optimize+', "/out:$OutputPath")
 if (-not $NoAdmin) { $args += "/win32manifest:$manifest" }
 $args += $source
+$args += (Join-Path $PSScriptRoot '..\src\TrainerUi.cs')
+$args += $powerSource
+$args += $buildSource
+$args += $hookSource
 
 Write-Host "编译器: $csc"
 & $csc @args
@@ -40,7 +47,7 @@ if ($LASTEXITCODE -ne 0) { throw "编译失败（退出码 $LASTEXITCODE）" }
 $info = (Get-Item $OutputPath).VersionInfo
 Write-Host "产物: $OutputPath"
 Write-Host "版本: $($info.FileVersion)  产品: $($info.ProductName)  公司: $($info.CompanyName)"
-if ($info.FileVersion -ne '3.3.6.4') { throw "版本号不符合预期（期望 3.3.6.4，实际 $($info.FileVersion)）" }
+if ($info.FileVersion -ne '1.0.0.0') { throw "版本号不符合预期（期望 1.0.0.0，实际 $($info.FileVersion)）" }
 
 if ($Sign) {
     $pfx = $env:MO_TRAINER_SIGN_PFX
@@ -52,7 +59,7 @@ if ($Sign) {
     if ($LASTEXITCODE -ne 0) { throw "签名失败（退出码 $LASTEXITCODE）" }
     Write-Host '签名完成'
 } else {
-    Write-Host '未签名：发布版本请使用 -Sign 并配置签名证书环境变量'
+    Write-Host '未签名：如需签名，可使用 -Sign 并配置证书环境变量'
 }
 
 $hash = (Get-FileHash $OutputPath -Algorithm SHA256).Hash

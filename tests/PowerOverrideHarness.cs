@@ -134,7 +134,9 @@ namespace MOTrainer336
             string line;
             while ((line = Console.ReadLine()) != null)
             {
-                string[] parts = line.Split(' ');
+                // .NET Framework can prepend a UTF-8 BOM to the redirected
+                // stdin pipe on UTF-8 desktops such as GitHub's Windows runner.
+                string[] parts = line.TrimStart('\uFEFF').Split(' ');
                 int player = parts.Length > 1 && parts[1] == "B" ? PlayerB : PlayerA;
                 if (parts[0] == "quit") break;
                 if (parts[0] == "eval")
@@ -248,7 +250,7 @@ namespace MOTrainer336
             string error;
             using (Fixture host = new Fixture())
             {
-                string baseline = host.Send("build A");
+                string baseline = host.Send("\uFEFFbuild A");
                 Check(baseline == "0,200", "build baseline retains natural production (observed: " + baseline + ")");
                 Check(host.BuildPatch.SetEnabled(true, out error), "enable instant build: " + error);
                 Check(host.Send("build A") == "53,0", "build advances player to final production step");

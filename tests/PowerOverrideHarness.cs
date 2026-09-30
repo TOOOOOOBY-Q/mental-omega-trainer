@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace MOTrainer336
 {
@@ -207,6 +208,8 @@ namespace MOTrainer336
                 start.RedirectStandardInput = true;
                 start.RedirectStandardOutput = true;
                 start.RedirectStandardError = true;
+                start.StandardOutputEncoding = new UTF8Encoding(false);
+                start.StandardErrorEncoding = new UTF8Encoding(false);
                 Child = Process.Start(start);
                 string ready = Child.StandardOutput.ReadLine();
                 if (ready == null || !ready.StartsWith("READY,"))
@@ -362,6 +365,8 @@ namespace MOTrainer336
         {
             try
             {
+                Console.InputEncoding = new UTF8Encoding(false);
+                Console.OutputEncoding = new UTF8Encoding(false);
                 if (args.Length != 0 && args[0] == "host") Host();
                 else if (args.Length == 2 && args[0] == "emit")
                 {
